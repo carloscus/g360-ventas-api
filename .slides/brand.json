@@ -1,0 +1,13 @@
+{
+  "fidelity": "brand",
+  "template": null,
+  "fonts": { "heading": "Segoe UI", "body": "Segoe UI" },
+  "colours": {
+    "ink": "#0b1220",
+    "surface": "#151e2e",
+    "accent": "#00796B",
+    "paper": "#f0f4f8",
+    "muted": "#94a3b8"
+  },
+  "tokens": { "shape": { "corner": "sharp", "hairline_pt": 1 } }
+}
