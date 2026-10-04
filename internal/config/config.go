@@ -16,10 +16,16 @@ type Config struct {
 	ExportDir string
 	User      string
 	Pass      string
+	Users     []UserConfig
 	Secret    string
 	TokenTTL  time.Duration
 	MaxFolios int
 	MaxLimit  int
+}
+
+type UserConfig struct {
+	User string `json:"user"`
+	Pass string `json:"pass"`
 }
 
 type producerConfig struct {
@@ -27,6 +33,7 @@ type producerConfig struct {
 		User string `json:"user"`
 		Pass string `json:"pass"`
 	} `json:"intranet"`
+	Users []UserConfig `json:"users"`
 }
 
 func DataDir() string {
@@ -86,14 +93,16 @@ func Load() *Config {
 		cfg.Secret = randomSecret()
 	}
 
-	cfg.User, cfg.Pass = loadCreds(dataDir)
+	cfg.Users = loadUsers(dataDir)
+	if len(cfg.Users) > 0 {
+		cfg.User, cfg.Pass = cfg.Users[0].User, cfg.Users[0].Pass
+	}
 	return cfg
 }
 
-func loadCreds(dataDir string) (string, string) {
+func loadUsers(dataDir string) []UserConfig {
 	if u := os.Getenv("G360_INTRANET_USER"); u != "" {
-		p := os.Getenv("G360_INTRANET_PASS")
-		return u, p
+		return []UserConfig{{User: u, Pass: os.Getenv("G360_INTRANET_PASS")}}
 	}
 	path := os.Getenv("G360_PRODUCER_CONFIG")
 	if path == "" {
@@ -101,13 +110,34 @@ func loadCreds(dataDir string) (string, string) {
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", ""
+		return nil
 	}
 	var pc producerConfig
 	if err := json.Unmarshal(raw, &pc); err != nil {
+		return nil
+	}
+	if len(pc.Users) > 0 {
+		out := make([]UserConfig, 0, len(pc.Users))
+		for _, cu := range pc.Users {
+			if cu.User == "" {
+				continue
+			}
+			out = append(out, UserConfig{User: cu.User, Pass: cu.Pass})
+		}
+		return out
+	}
+	if pc.Intranet.User == "" {
+		return nil
+	}
+	return []UserConfig{{User: pc.Intranet.User, Pass: pc.Intranet.Pass}}
+}
+
+func loadCreds(dataDir string) (string, string) {
+	users := loadUsers(dataDir)
+	if len(users) == 0 {
 		return "", ""
 	}
-	return pc.Intranet.User, pc.Intranet.Pass
+	return users[0].User, users[0].Pass
 }
 
 func randomSecret() string {

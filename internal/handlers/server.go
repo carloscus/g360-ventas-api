@@ -18,6 +18,8 @@ type Server struct {
 	Auth          *auth.Manager
 	checksumCache *cachedResult
 	statsCache    *cachedResult
+	statusCache   *cachedResult
+	refreshState  *RefreshState
 }
 
 func New(cfg *config.Config, store *db.Store, am *auth.Manager) *Server {
@@ -27,6 +29,8 @@ func New(cfg *config.Config, store *db.Store, am *auth.Manager) *Server {
 		Auth:          am,
 		checksumCache: &cachedResult{ttl: 60 * time.Second},
 		statsCache:    &cachedResult{ttl: 60 * time.Second},
+		statusCache:   &cachedResult{ttl: 30 * time.Second},
+		refreshState:  &RefreshState{Status: "idle"},
 	}
 }
 
@@ -44,6 +48,10 @@ func (s *Server) Routes() http.Handler {
 	protected.HandleFunc("GET /api/stats", s.handleStats)
 	protected.HandleFunc("GET /api/export/list", s.handleExportList)
 	protected.HandleFunc("GET /api/export/base-canonica", s.handleExportDownload)
+
+	// Admin endpoints (protected: require auth)
+	protected.HandleFunc("POST /api/admin/refresh", s.HandleRefreshRequest)
+	protected.HandleFunc("GET /api/admin/refresh-status", s.HandleRefreshStatus)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", s.handleLogin)
@@ -70,7 +78,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"api":   "g360-ventas-api",
 		"auth":  "POST /api/login {user,password} -> token",
-		"rutas": []string{"/api/health", "/api/status", "/api/checksums", "/api/day-checksums", "/api/folios", "/api/contrast", "/api/ventas/by-folios", "/api/model", "/api/data/{obj}", "/api/query/{obj}", "/api/stats", "/api/export/list", "/api/export/base-canonica"},
+		"rutas": []string{"/api/health", "/api/status", "/api/checksums", "/api/day-checksums", "/api/folios", "/api/contrast", "/api/ventas/by-folios", "/api/model", "/api/data/{obj}", "/api/query/{obj}", "/api/stats", "/api/export/list", "/api/export/base-canonica", "/api/admin/refresh", "/api/admin/refresh-status"},
 	})
 }
 
@@ -96,6 +104,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":        token,
+		"user":         body.User,
 		"expires_at":   exp.UTC().Format(time.RFC3339),
 		"ttl_segundos": int(s.Cfg.TokenTTL.Seconds()),
 	})

@@ -16,7 +16,36 @@ intranet CIPSA → g360-ventas-db (Tauri/Rust, único escritor) → historial.db
 
 - Go 1.27+ (solo para compilar)
 - La BD productora en `%APPDATA%\g360-db-ventas\data\historial.db` (la app Tauri puede estar corriendo: WAL permite lectores concurrentes)
-- Credenciales intranet en `config.json` de la productora (sección `intranet`) o variables de entorno
+- Credenciales intranet en `config.json` de la productora (sección `intranet` o lista `users`) o variables de entorno
+
+## Multi-usuario
+
+El API acepta N usuarios con las mismas credenciales del intranet. Formatos soportados
+en `config.json` (con fallback en ese orden: `G360_INTRANET_USER/PASS` → `users` → `intranet`):
+
+```json
+{ "users": [{ "user": "ccusi", "pass": "..." }, { "user": "cliente1", "pass": "..." }] }
+```
+
+Formato legacy (un usuario) sigue funcionando:
+
+```json
+{ "intranet": { "user": "ccusi", "pass": "..." } }
+```
+
+El token incluye el usuario (`usuario.expira.hmac`) y `POST /api/login` devuelve
+`{token, user, expires_at, ttl_segundos}`.
+
+## Arranque en WSL2
+
+```powershell
+pwsh deploy/build-linux.ps1   # compila dist/g360-ventas-api-linux (reconstruir tras cada cambio Go)
+pwsh deploy/start_api.ps1     # levanta en 127.0.0.1:8091 y verifica /api/health
+```
+
+`deploy/start_api.sh` exporta todas las variables dentro de WSL (no depende del
+passthrough de entorno PowerShell→WSL) y registra el entorno efectivo en
+`~/g360data/api.log`.
 
 ## Compilar y probar
 
@@ -53,7 +82,7 @@ Variables de entorno (todas opcionales):
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/api/login` | `{user,password}` → `{token, expires_at}` |
+| POST | `/api/login` | `{user,password}` → `{token, user, expires_at}` |
 | GET | `/api/health` | liveness (sin auth) |
 
 El token se envía en `Authorization: Bearer <token>`, `X-API-Key: <token>` o `?token=<token>` (útil para descargas desde navegador).

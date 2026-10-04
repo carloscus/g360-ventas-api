@@ -31,14 +31,19 @@ func main() {
 		log.Printf("db: %s (%d objetos permitidos)", cfg.DBPath, len(store.Allowed()))
 	}
 
-	if cfg.User == "" || cfg.Pass == "" {
+	if len(cfg.Users) == 0 {
 		log.Print("ADVERTENCIA: sin credenciales intranet (G360_INTRANET_USER/PASS o config.json) — login rechazara todo")
 	} else {
-		log.Printf("login: credenciales intranet cargadas (usuario %q)", cfg.User)
+		log.Printf("login: %d usuario(s) configurados (principal %q)", len(cfg.Users), cfg.User)
 	}
 
-	am := auth.New(cfg.Secret, cfg.User, cfg.Pass, cfg.TokenTTL)
+	am := auth.NewMulti(cfg.Secret, cfg.Users, cfg.TokenTTL)
 	srv := handlers.New(cfg, store, am)
+
+	// Iniciar el watcher de refresh on-demand en background.
+	// Los clientes pueden solicitar refresh via POST /api/admin/refresh;
+	// este goroutine detecta el trigger file y ejecuta el proceso.
+	go srv.RunRefreshWorkflow()
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,

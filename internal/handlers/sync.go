@@ -55,7 +55,20 @@ func (c *cachedResult) set(v any) {
 	c.entry = &cacheEntry{at: time.Now(), data: v}
 }
 
+func (c *cachedResult) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entry = nil
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	// Cache 30s: el snapshot es statico entre refreshes, no vale la pena
+	// re-calcular COUNT(*)+MIN+MAX en cada request (tarda 3-9s en DB de 2.6 GB).
+	if v, ok := s.statusCache.get(); ok {
+		writeJSON(w, http.StatusOK, v)
+		return
+	}
+
 	var (
 		filas        int64
 		desde, hasta sql.NullString
@@ -85,6 +98,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if capturado.Valid {
 		out["capturado_en_ultimo"] = capturado.String
 	}
+	s.statusCache.set(out)
 	writeJSON(w, http.StatusOK, out)
 }
 

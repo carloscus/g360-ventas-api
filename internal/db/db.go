@@ -81,7 +81,51 @@ func (s *Store) Path() string { return s.path }
 
 func (s *Store) Ping(ctx context.Context) error { return s.sql.PingContext(ctx) }
 
-func (s *Store) DB() *sql.DB { return s.sql }
+func (s *Store) DB() *sql.DB {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sql
+}
+
+// Reopen cierra el pool actual y reabre la DB desde el path configurado.
+// Se usa tras reemplazar el archivo del snapshot: las conexiones viejas
+// apuntan al inode anterior y seguirian sirviendo datos viejos. El pool
+// viejo se cierra con un periodo de gracia para no tumbar queries en vuelo.
+func (s *Store) Reopen() error {
+	abs := s.path
+	u := url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(abs), RawQuery: "mode=ro"}
+	dsn := u.String() + "&_pragma=query_only(1)"
+
+	newDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return err
+	}
+	newDB.SetMaxOpenConns(4)
+	newDB.SetMaxIdleConns(4)
+	newDB.SetConnMaxIdleTime(time.Minute)
+	if err := newDB.PingContext(context.Background()); err != nil {
+		newDB.Close()
+		return err
+	}
+
+	s.mu.Lock()
+	old := s.sql
+	s.sql = newDB
+	s.mu.Unlock()
+
+	if err := s.Refresh(context.Background()); err != nil {
+		go func() {
+			time.Sleep(5 * time.Second)
+			old.Close()
+		}()
+		return err
+	}
+	go func() {
+		time.Sleep(5 * time.Second)
+		old.Close()
+	}()
+	return nil
+}
 
 func (s *Store) Refresh(ctx context.Context) error {
 	rows, err := s.sql.QueryContext(ctx,
@@ -253,6 +297,21 @@ func ScanAll(rows *sql.Rows) ([]map[string]any, error) {
 	return out, rows.Err()
 }
 
+// normalize adapta el tipo que devuelve el driver, NO convierte fechas.
+//
+// IMPORTANTE — invariante: todas las columnas de fecha de la base (fecha_orig,
+// fecha_ref, fecha_venc, fec_cargo) se guardan en ISO `yyyy-mm-dd` y se
+// devuelven al cliente byte a byte como estan. Este API no las reformatea.
+//
+// La razon de que sea seguro: el SQL compara fechas como TEXTO (>=, <=,
+// BETWEEN, ORDER BY, MIN/MAX, substr), y eso solo es cronologico con ISO. Si
+// alguna vez se guardara una fecha en dd/mm/yyyy, esas consultas devolverian
+// resultados silenciosamente equivocados — sin error. Por eso elProductor
+// (la app G360) normaliza a ISO antes de escribir.
+//
+// Consecuencia para el cliente: un valor TEXT con formato de fecha llega tal
+// cual, sin convertir. Los timestamps que genera el servidor (generado_en,
+// calculado_en, started_at, health) sí van en RFC3339 UTC.
 func normalize(v any) any {
 	switch t := v.(type) {
 	case []byte:

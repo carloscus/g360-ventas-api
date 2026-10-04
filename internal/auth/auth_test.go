@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"g360-ventas-api/internal/config"
 )
 
 func TestLoginAndVerify(t *testing.T) {
@@ -88,5 +90,58 @@ func TestRequireMiddleware(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/x?token="+tok, nil))
 	if rec.Code != http.StatusOK {
 		t.Errorf("query token = %d", rec.Code)
+	}
+}
+
+func TestMultiUserLogin(t *testing.T) {
+	m := NewMulti("secret", []config.UserConfig{
+		{User: "ccusi", Pass: "123456"},
+		{User: "cliente1", Pass: "clave1"},
+	}, time.Hour)
+	if m.UserCount() != 2 {
+		t.Fatalf("usuarios = %d, quiero 2", m.UserCount())
+	}
+
+	tok1, _, err := m.Login("ccusi", "123456")
+	if err != nil {
+		t.Fatalf("login ccusi: %v", err)
+	}
+	tok2, _, err := m.Login("cliente1", "clave1")
+	if err != nil {
+		t.Fatalf("login cliente1: %v", err)
+	}
+	if tok1 == tok2 {
+		t.Error("tokens de usuarios distintos no deberian coincidir")
+	}
+	if err := m.Verify(tok1); err != nil {
+		t.Errorf("verify tok1: %v", err)
+	}
+	if err := m.Verify(tok2); err != nil {
+		t.Errorf("verify tok2: %v", err)
+	}
+	if u, err := m.VerifyUser(tok1); err != nil || u != "ccusi" {
+		t.Errorf("VerifyUser tok1 = %q, %v", u, err)
+	}
+	if u, err := m.VerifyUser(tok2); err != nil || u != "cliente1" {
+		t.Errorf("VerifyUser tok2 = %q, %v", u, err)
+	}
+	// Credenciales cruzadas deben fallar.
+	if _, _, err := m.Login("ccusi", "clave1"); err != ErrBadCredentials {
+		t.Errorf("cruce pass = %v", err)
+	}
+	if _, _, err := m.Login("nadie", "123456"); err != ErrBadCredentials {
+		t.Errorf("usuario inexistente = %v", err)
+	}
+}
+
+func TestVerifyLegacyToken(t *testing.T) {
+	m := New("secret", "user1", "pass1", time.Hour)
+	tok, _, err := m.Login("user1", "pass1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// El token nuevo lleva username; Verify clasico debe seguir aceptandolo.
+	if err := m.Verify(tok); err != nil {
+		t.Fatalf("verify token con usuario: %v", err)
 	}
 }

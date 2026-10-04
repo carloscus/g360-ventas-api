@@ -1,4 +1,5 @@
 """Snapshot consistente de historial.db con la SQLite backup API (fuente solo lectura)."""
+
 import argparse
 import os
 import sqlite3
@@ -9,13 +10,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--source",
+        # En WSL no existe APPDATA; el API siempre pasa --source explicito.
         default=os.path.join(
-            os.environ["APPDATA"], "g360-db-ventas", "data", "historial.db"
+            os.environ.get("APPDATA", ""), "g360-db-ventas", "data", "historial.db"
         ),
     )
     ap.add_argument(
         "--dest",
-        default=os.path.join(os.environ["TEMP"], "g360_snapshot", "historial.db"),
+        default=os.path.join(os.environ.get("TEMP", "/tmp"), "g360_snapshot", "historial.db"),
     )
     args = ap.parse_args()
 
@@ -31,7 +33,7 @@ def main() -> None:
     dst.close()
     src.close()
     size = os.path.getsize(args.dest)
-    print(f"snapshot ok: {args.dest} ({size/1e9:.2f} GB) en {time.time()-t0:.1f}s")
+    print(f"snapshot ok: {args.dest} ({size / 1e9:.2f} GB) en {time.time() - t0:.1f}s")
 
 
 if __name__ == "__main__":
